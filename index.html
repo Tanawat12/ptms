@@ -284,7 +284,7 @@ ul { list-style: none; padding: 0; margin: 0; }
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
 
 <!-- ICONS -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const Icon = ({ name, size = 16, stroke = 1.6, className = '', style = {} }) => {
   const s = { width: size, height: size, ...style };
   const props = {
@@ -363,7 +363,7 @@ window.Icon = Icon;
 </script>
 
 <!-- DATA -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const MOCK_CLIENTS = [
   { id: 'C-1042', name: 'Sumitomo Precision Co., Ltd.', industry: 'Auto parts', country: 'TH', plan: 'Enterprise', seats: 312, used: 287, status: 'active', mrr: 4980, since: '2024-08-12', primaryContact: 'Khun Apinya P.' },
   { id: 'C-1041', name: 'Hanwa Electronics Bangna', industry: 'Electronics', country: 'TH', plan: 'Business', seats: 180, used: 164, status: 'active', mrr: 2680, since: '2024-10-03', primaryContact: 'Mr. Daichi Sato' },
@@ -520,7 +520,7 @@ window.PTMS_DATA = { MOCK_CLIENTS, ORG_TREE, EMPLOYEES, WORK_INSTRUCTIONS, SKILL
 </script>
 
 <!-- SHELL -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const { useState, useEffect, useMemo, useRef } = React;
 
 const ROLE_DEFS = [
@@ -760,7 +760,7 @@ window.PTMS_SHELL = { ROLE_DEFS, Topbar, Sidebar, SubNav, PageHeader, StatRow, M
 </script>
 
 <!-- AUTH -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const AuthScreen = ({ onLogin }) => {
   const [stage, setStage] = useState('login');
   const [email, setEmail] = useState('tanawat@ptms.io');
@@ -880,7 +880,7 @@ window.AuthScreen = AuthScreen;
 </script>
 
 <!-- OWNER SCREENS -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const { MOCK_CLIENTS, INVOICES } = window.PTMS_DATA;
 const { PageHeader, StatRow, Modal } = window.PTMS_SHELL;
 
@@ -1350,7 +1350,7 @@ Object.assign(window, { OwnerDashboard, ClientsList, ClientOnboardingWizard, Bil
 </script>
 
 <!-- ADMIN SCREENS -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const { ORG_TREE, EMPLOYEES, ROLES, AUDIT_LOG } = window.PTMS_DATA;
 const { PageHeader: PH, StatRow: SR, Modal: MD } = window.PTMS_SHELL;
 
@@ -1755,7 +1755,7 @@ Object.assign(window, { AdminDashboard, OrgStructure, UsersList, RolesAccess, Au
 </script>
 
 <!-- HR SCREENS -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const { EMPLOYEES: EMP, WORK_INSTRUCTIONS: WIS, SKILL_DATA: SKD, SKILL_MATRIX_WIS: SKMWIS } = window.PTMS_DATA;
 const { PageHeader: PH2, Modal: MD2 } = window.PTMS_SHELL;
 
@@ -2117,7 +2117,7 @@ Object.assign(window, { EmployeesDirectory, Subcontractors });
 </script>
 
 <!-- TRAINING SCREENS -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const { WORK_INSTRUCTIONS: WIS_ALL } = window.PTMS_DATA;
 const { PageHeader: PH3, Modal: MD3 } = window.PTMS_SHELL;
 
@@ -2559,7 +2559,7 @@ Object.assign(window, { WIList });
 </script>
 
 <!-- MODULES SCREENS -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const { EMPLOYEES: EMP2, WORK_INSTRUCTIONS: WIS2, SKILL_DATA: SKD2, SKILL_MATRIX_WIS: SKM2, EXPIRY_ALERTS: EXP, DEFECTS, PPE_LOG } = window.PTMS_DATA;
 const { PageHeader: PH4, StatRow: SR4, Modal: MD4 } = window.PTMS_SHELL;
 
@@ -2996,7 +2996,7 @@ Object.assign(window, { SkillMatrix, ExpiryAlerts, DefectsLog, PPELog, Reports, 
 </script>
 
 <!-- MAIN APP -->
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const { ROLE_DEFS, Topbar, Sidebar, ToastStack, useToasts, PageHeader: PHA, StatRow: SRA } = window.PTMS_SHELL;
 
 const DEFAULT_SCREENS = {
