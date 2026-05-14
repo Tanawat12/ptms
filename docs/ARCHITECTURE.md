@@ -219,15 +219,20 @@ Listed explicitly so we don't drift:
 
 ---
 
-## 12. Open questions for Tanawat
+## 12. Decisions locked in (2026-05-14, with Tanawat)
 
-When you wake up, please decide:
+1. **Pricing model:** ✅ **LOCKED** — Per-active-worker (employees + subcontract together) at **99 THB / ~$3 USD per worker per month**.
+   Example: 1,000-worker factory = **99,000 THB ($3,000 USD) per month** = $36,000 USD ARR per customer.
+2. **Bluemat** = separate `subcontract_workers` table (different lifecycle from employees). ✅ Locked.
+3. **RAD scale** = locked enum 0/1/2 (the differentiator). Per-tenant level naming added if requested. ✅ Locked.
+4. **JD Assessment** = fixed 6 dimensions (Purpose / JC / KR / CS / LC / LP) for v1. Configurable in v2. ✅ Locked.
+5. **Build order** = Sprints 0 → 12 as drafted. ✅ Locked.
 
-1. **Pricing model:** Per-tenant flat fee, per-user, per-employee, or per-active-worker? My recommendation: **per-active-worker** (counts employees + subcontract together). It scales with value.
-2. **First customer:** Is it MEYERCAP themselves? If yes, do they pay or is it a freebie for being the design partner?
-3. **Branding:** Keep the prototype's pastel grey + blue, or do you want to rebrand?
-4. **Domain name:** Have you bought a `.com` yet? My suggestion: something short like `ptms.app` or `mptms.io` — I can research available domains if you want.
-5. **Beta customers:** Do you have 2-3 factories lined up to be early adopters? If yes, we should design with their feedback in the loop.
+## 12b. Open questions still to decide
+1. **First customer:** Is it MEYERCAP themselves? If yes, do they pay or is it a freebie for being the design partner?
+2. **Branding:** Keep the prototype's pastel grey + blue, or do you want to rebrand?
+3. **Domain name:** Have you bought a `.com` yet? My suggestion: something short like `ptms.app` or `mptms.io` — I can research available domains if you want.
+4. **Beta customers:** Do you have 2-3 factories lined up to be early adopters? If yes, we should design with their feedback in the loop.
 
 ---
 
