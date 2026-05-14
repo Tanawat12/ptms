@@ -275,17 +275,20 @@ create index on wi_test_questions(wi_id, sequence);
 -- =====================================================================
 -- C. OJA (On-the-Job Assessment) ENGINE ⭐ THE KILLER FEATURE
 -- =====================================================================
--- When a trainer/assessor goes to the floor to assess an operator on a WI:
---   1. They open an OJA session for one operator + one WI
---   2. They tick off each PPE the operator wears → oja_ppe_observations row
---   3. They watch each task being performed → oja_task_observations row
---   4. They note each defect found/avoided → oja_defect_observations row
---   5. They optionally administer test questions
---   6. Session is closed; system computes pass/fail + RAD level
---   7. Result flows into skill_records (with history)
+-- REVISED MODEL (2026-05-14, after Tanawat clarification):
+-- When a trainer/foreman/supervisor goes to the floor:
+--   1. They open ONE OJA VISIT (date, shift, location, assessor)
+--   2. Within the visit, they assess MULTIPLE workers × MULTIPLE WIs
+--   3. Each (worker, WI) pair = one OJA ASSESSMENT
+--   4. Each assessment has:
+--        - Multiple PPE observations (one per WI's required PPE)
+--        - Multiple task observations (one per WI task)
+--        - Multiple defect observations (one per defect to watch)
+--        - Optional test answers
+--   5. Assessment result → updates skill_records with RAD level
 --
--- Real data scale: 73,871 task observations across all sessions.
--- This is the production-floor reality.
+-- Real data scale: 73,871 task observations roll up to ~5,000 assessments
+-- which roll up to ~500-1,000 visits. Much more efficient query patterns.
 
 create type oja_outcome as enum (
   'pass',          -- task done correctly / PPE worn / defect avoided
@@ -299,118 +302,154 @@ create type oja_session_status as enum (
   'scheduled','in_progress','completed','cancelled','disputed'
 );
 
--- One OJA session per (operator, WI, date)
-create table oja_sessions (
-  id            uuid primary key default uuid_generate_v4(),
-  tenant_id     uuid not null references tenants(id) on delete cascade,
+create type oja_assessor_role as enum (
+  'on_job_trainer','foreman','supervisor','quality_lead','manager','peer'
+);
+
+-- ONE VISIT = one assessor goes to the floor for a session of work
+-- Real-world: a trainer spends 2 hours on the floor, assesses 5 workers
+-- across 8 different WIs → that's 1 visit, ~10 assessments, ~100 observations.
+create table oja_visits (
+  id                uuid primary key default uuid_generate_v4(),
+  tenant_id         uuid not null references tenants(id) on delete cascade,
+
+  -- When & where
+  visit_date        date not null,
+  visit_year        int generated always as (extract(year from visit_date)::int) stored,
+  visit_month       int generated always as (extract(month from visit_date)::int) stored,
+  shift_id          uuid references shifts(id),
+  org_node_id       uuid references org_nodes(id),
+
+  -- Who's assessing
+  assessor_employee_id uuid references employees(id),
+  assessor_role     oja_assessor_role not null default 'on_job_trainer',
+
+  -- Visit lifecycle
+  status            oja_session_status not null default 'scheduled',
+  started_at        timestamptz,
+  completed_at      timestamptz,
+
+  -- Summary stats (populated when visit is completed)
+  workers_assessed_count int default 0,
+  assessments_count int default 0,
+  observations_count int default 0,
+
+  notes             text,
+  metadata          jsonb not null default '{}',
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+create index on oja_visits(tenant_id, visit_date desc);
+create index on oja_visits(assessor_employee_id, visit_date desc);
+
+-- ONE ASSESSMENT = one worker × one WI within a visit
+-- The result here updates skill_records and skill_record_history.
+create table oja_assessments (
+  id                uuid primary key default uuid_generate_v4(),
+  tenant_id         uuid not null references tenants(id) on delete cascade,
+  visit_id          uuid not null references oja_visits(id) on delete cascade,
 
   -- Who is being assessed (one of these two)
-  employee_id   uuid references employees(id),
+  employee_id       uuid references employees(id),
   subcontract_worker_id uuid references subcontract_workers(id),
 
   -- What is being assessed
-  wi_id         uuid not null references work_instructions(id) on delete restrict,
+  wi_id             uuid not null references work_instructions(id) on delete restrict,
 
-  -- When & where
-  assessment_date date not null,
-  assessment_year int generated always as (extract(year from assessment_date)::int) stored,
-  assessment_month int generated always as (extract(month from assessment_date)::int) stored,
-  shift_id      uuid references shifts(id),
-  org_node_id   uuid references org_nodes(id),
-
-  -- Who is assessing
-  assessor_employee_id uuid references employees(id),
-  assessor_role text default 'trainer'
-                check (assessor_role in ('trainer','supervisor','quality_lead','manager','peer')),
-
-  -- Session lifecycle
-  status        oja_session_status not null default 'scheduled',
-  started_at    timestamptz,
-  completed_at  timestamptz,
-
-  -- Computed results (filled when session is completed)
-  ppe_pass_count int default 0,
-  ppe_fail_count int default 0,
-  task_pass_count int default 0,
-  task_fail_count int default 0,
-  defect_count   int default 0,
-  test_score     numeric(5,2),                          -- % correct on test questions
-  overall_result text check (overall_result in ('pass','fail','retake')),
+  -- Computed results (filled when assessment is completed)
+  ppe_pass_count    int default 0,
+  ppe_fail_count    int default 0,
+  task_pass_count   int default 0,
+  task_fail_count   int default 0,
+  task_partial_count int default 0,
+  defect_count      int default 0,
+  test_score        numeric(5,2),                       -- % correct on test questions
+  overall_result    text check (overall_result in ('pass','fail','retake','partial')),
   rad_level_awarded rad_level,                          -- '0','1','2'
 
-  -- Audit
-  notes         text,
-  evidence_urls text[],                                 -- photos / videos from session
-  signature_url text,                                   -- digital sign-off by operator
-  metadata      jsonb not null default '{}',
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now(),
+  -- Sign-off
+  notes             text,
+  evidence_urls     text[],                             -- photos/videos for this specific assessment
+  worker_signature_url text,                            -- worker's digital sign-off
+  assessor_signature_url text,                          -- assessor's digital sign-off
+  metadata          jsonb not null default '{}',
+  completed_at      timestamptz,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
 
-  check (employee_id is not null or subcontract_worker_id is not null)
+  check (employee_id is not null or subcontract_worker_id is not null),
+
+  -- One assessment per (worker, WI) within a visit
+  unique (visit_id, employee_id, wi_id),
+  unique (visit_id, subcontract_worker_id, wi_id)
 );
-create index on oja_sessions(tenant_id, assessment_date desc);
-create index on oja_sessions(employee_id, assessment_date desc) where employee_id is not null;
-create index on oja_sessions(subcontract_worker_id, assessment_date desc) where subcontract_worker_id is not null;
-create index on oja_sessions(wi_id, assessment_date desc);
+create index on oja_assessments(tenant_id);
+create index on oja_assessments(visit_id);
+create index on oja_assessments(employee_id) where employee_id is not null;
+create index on oja_assessments(subcontract_worker_id) where subcontract_worker_id is not null;
+create index on oja_assessments(wi_id);
 
--- Each task observed during the session
+-- Observations are now linked to ASSESSMENT (not session), giving us full traceability
+-- back through assessment → visit → assessor.
+
+-- Each task observed during the assessment
 -- Real data: 73,871 rows
 create table oja_task_observations (
   id            uuid primary key default uuid_generate_v4(),
   tenant_id     uuid not null references tenants(id) on delete cascade,
-  oja_session_id uuid not null references oja_sessions(id) on delete cascade,
+  oja_assessment_id uuid not null references oja_assessments(id) on delete cascade,
   wi_task_id    uuid not null references wi_tasks(id) on delete restrict,
   outcome       oja_outcome not null,
   notes         text,
   evidence_url  text,
   created_at    timestamptz not null default now(),
-  unique (oja_session_id, wi_task_id)
+  unique (oja_assessment_id, wi_task_id)
 );
-create index on oja_task_observations(oja_session_id);
+create index on oja_task_observations(oja_assessment_id);
 
--- Each PPE checked during the session
+-- Each PPE checked during the assessment
 -- Real data: 66,839 rows
 create table oja_ppe_observations (
   id            uuid primary key default uuid_generate_v4(),
   tenant_id     uuid not null references tenants(id) on delete cascade,
-  oja_session_id uuid not null references oja_sessions(id) on delete cascade,
+  oja_assessment_id uuid not null references oja_assessments(id) on delete cascade,
   wi_ppe_requirement_id uuid not null references wi_ppe_requirements(id) on delete restrict,
   outcome       oja_outcome not null,                   -- 'pass' = wearing it; 'fail' = not wearing
   notes         text,
   evidence_url  text,
   created_at    timestamptz not null default now(),
-  unique (oja_session_id, wi_ppe_requirement_id)
+  unique (oja_assessment_id, wi_ppe_requirement_id)
 );
-create index on oja_ppe_observations(oja_session_id);
+create index on oja_ppe_observations(oja_assessment_id);
 
--- Each defect awareness / occurrence noted during the session
+-- Each defect awareness / occurrence noted during the assessment
 -- Real data: 42,215 rows
 create table oja_defect_observations (
   id            uuid primary key default uuid_generate_v4(),
   tenant_id     uuid not null references tenants(id) on delete cascade,
-  oja_session_id uuid not null references oja_sessions(id) on delete cascade,
+  oja_assessment_id uuid not null references oja_assessments(id) on delete cascade,
   wi_defect_check_id uuid not null references wi_defect_checks(id) on delete restrict,
   outcome       oja_outcome not null,                   -- 'aware' = knows about, 'fail' = defect happened
   defect_count  int default 0,                          -- if 'fail', how many defects produced
   notes         text,
   evidence_url  text,
   created_at    timestamptz not null default now(),
-  unique (oja_session_id, wi_defect_check_id)
+  unique (oja_assessment_id, wi_defect_check_id)
 );
-create index on oja_defect_observations(oja_session_id);
+create index on oja_defect_observations(oja_assessment_id);
 
--- Each test question answered during the session (if test was administered)
+-- Each test question answered during the assessment (if test was administered)
 create table oja_test_answers (
   id            uuid primary key default uuid_generate_v4(),
   tenant_id     uuid not null references tenants(id) on delete cascade,
-  oja_session_id uuid not null references oja_sessions(id) on delete cascade,
+  oja_assessment_id uuid not null references oja_assessments(id) on delete cascade,
   wi_test_question_id uuid not null references wi_test_questions(id) on delete restrict,
   given_answer  text,
   is_correct    boolean,
   score         int,
   notes         text,
   created_at    timestamptz not null default now(),
-  unique (oja_session_id, wi_test_question_id)
+  unique (oja_assessment_id, wi_test_question_id)
 );
 
 
@@ -478,7 +517,7 @@ declare new_tables text[] := array[
   'cost_centers','shifts','competencies_catalog','position_competencies',
   'position_key_responsibilities','position_subordinates','hr_forms',
   'policy_types','policies','wi_pre_steps','wi_tasks','wi_post_steps',
-  'wi_test_questions','oja_sessions','oja_task_observations',
+  'wi_test_questions','oja_visits','oja_assessments','oja_task_observations',
   'oja_ppe_observations','oja_defect_observations','oja_test_answers',
   'candidate_role_matches','recruitment_progression_log','training_record_attachments'
 ];
@@ -500,10 +539,12 @@ end$$;
 -- =====================================================================
 
 insert into permissions (code, module, description) values
-  ('oja.session_create',      'training',    'Start an OJA assessment session'),
-  ('oja.session_complete',    'training',    'Complete & sign-off an OJA session'),
-  ('oja.session_dispute',     'training',    'Dispute an OJA session result'),
-  ('oja.session_view_all',    'training',    'View all OJA sessions across tenant'),
+  ('oja.visit_create',        'training',    'Start an OJA floor visit'),
+  ('oja.visit_complete',      'training',    'Complete an OJA visit'),
+  ('oja.assessment_create',   'training',    'Add a worker assessment to a visit'),
+  ('oja.assessment_complete', 'training',    'Complete & sign-off a single assessment'),
+  ('oja.assessment_dispute',  'training',    'Dispute an OJA assessment result'),
+  ('oja.view_all',            'training',    'View all OJA visits/assessments across tenant'),
   ('competency.read',         'people',      'View competency catalogs'),
   ('competency.manage',       'people',      'Manage competencies, JCs, KRs'),
   ('policy.read',             'people',      'View HR policies'),
@@ -559,36 +600,66 @@ left join employees e on sr.employee_id = e.id
 left join subcontract_workers sw on sr.subcontract_worker_id = sw.id
 join work_instructions wi on sr.wi_id = wi.id;
 
--- OJA session summary view (latest 90 days)
-create or replace view v_recent_oja_sessions as
+-- OJA assessment summary view (latest 90 days) with visit context
+create or replace view v_recent_oja_assessments as
 select
-  s.tenant_id,
-  s.id,
-  s.assessment_date,
-  s.wi_id,
+  a.tenant_id,
+  a.id as assessment_id,
+  v.id as visit_id,
+  v.visit_date,
+  v.shift_id,
+  v.assessor_role,
+  a.wi_id,
   wi.code as wi_code,
   wi.name_en as wi_name,
   coalesce(e.employee_code, sw.worker_code) as worker_code,
+  case when e.id is not null then 'employee' else 'subcontract' end as worker_type,
   coalesce(e.first_name_en, sw.first_name_en) as worker_first_name,
+  coalesce(e.last_name_en, sw.last_name_en) as worker_last_name,
   ae.employee_code as assessor_code,
   ae.first_name_en as assessor_first_name,
-  s.overall_result,
-  s.rad_level_awarded,
-  s.task_pass_count,
-  s.task_fail_count,
-  s.ppe_pass_count,
-  s.ppe_fail_count,
-  s.defect_count,
-  s.test_score,
-  s.status,
-  s.completed_at
-from oja_sessions s
-left join employees e on s.employee_id = e.id
-left join subcontract_workers sw on s.subcontract_worker_id = sw.id
-join work_instructions wi on s.wi_id = wi.id
-left join employees ae on s.assessor_employee_id = ae.id
-where s.assessment_date > current_date - interval '90 days'
-order by s.assessment_date desc;
+  a.overall_result,
+  a.rad_level_awarded,
+  a.task_pass_count,
+  a.task_fail_count,
+  a.task_partial_count,
+  a.ppe_pass_count,
+  a.ppe_fail_count,
+  a.defect_count,
+  a.test_score,
+  v.status as visit_status,
+  a.completed_at
+from oja_assessments a
+join oja_visits v on a.visit_id = v.id
+left join employees e on a.employee_id = e.id
+left join subcontract_workers sw on a.subcontract_worker_id = sw.id
+join work_instructions wi on a.wi_id = wi.id
+left join employees ae on v.assessor_employee_id = ae.id
+where v.visit_date > current_date - interval '90 days'
+order by v.visit_date desc, a.created_at desc;
+
+-- OJA visit summary view (productivity reporting)
+create or replace view v_oja_visit_summary as
+select
+  v.tenant_id,
+  v.id as visit_id,
+  v.visit_date,
+  v.visit_year,
+  v.visit_month,
+  v.assessor_role,
+  ae.employee_code as assessor_code,
+  ae.first_name_en as assessor_first_name,
+  ae.last_name_en as assessor_last_name,
+  v.org_node_id,
+  v.status,
+  v.workers_assessed_count,
+  v.assessments_count,
+  v.observations_count,
+  v.started_at,
+  v.completed_at,
+  extract(epoch from (v.completed_at - v.started_at)) / 60 as duration_minutes
+from oja_visits v
+left join employees ae on v.assessor_employee_id = ae.id;
 
 
 -- =====================================================================
